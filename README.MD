@@ -1,29 +1,51 @@
 # ASP.Net User Session Manager
-After a user logs in to your web application (or a client authenticates to your API) you will usually want to maintain a *user session* so the user stays logged in for a while. You may do this by setting a cookie or issuing a token.  
-However, the built-in methods in the various versions of ASP.Net (incl. Core) for doing this are somewhat minimalistic. 
+After a user logs in to your web application (or a client authenticates to your API) you will usually want to maintain an *authenticated user session* so the user stays logged in for a while. 
 
-*This library aims to provide a more comprehensive solution for user session management that complies with security best practices.* It is intended for use in web applications, including SPAs and hybrid mobile applications where the client cannot be trusted. It will be designed to also be usable from rich clients, including server-to-server use, though for those scenarios there are more robust and arguably better solutions available in protocols like OIDC and oAuth.
+ASP.Net provides good built-in support for Stateless Authenticated User Sessions. However, for security reasons, you may often want to use Stateful Authenticated User Sessions.  
+
+*This library aims to provide an alternative set of middleware and tools to enable you to use Stateful Authenticated User Sessions with ASP.Net*
 
 **NOTE: At this point in time, no code has been written. This page here is first and foremost intended as a Request For Comment to establish design criteria - and to confirm that there isn't already a solution out there.**
 
-**Terminology**  
-The term *token* is used here to mean the scenario where the server passes a string value to the client, which the client then stores somehow and transmits to the server with each request. This is a bit lazy TBH as we are just taking about sending a plain Session ID, not a proper token with lots of data in it. Please forgive and feel free to suggest a better term.
 
 ## The problem
-We are used to talking about Authentication and Authorisation but, unfortunately, the concept of the User Session is obfuscated and often confused with "ASP.Net Sessions", which are usually a bad idea. For example, there is a "cookie authentication middleware". This middleware is (marginally) involved in authentication but is actually primarily about handling the User Session, i.e. checking the cookie on each request and populating the Principal on the request. It should arguable be called "cookie *session* middleware".
+Unfortunately there is a lot of confusion about the whole area of "how to keep users logged in", so the "problem description" here takes quite a lot of words to explain what the problem even is. Sorry.
 
-In addition to being somewhat confusing, the built-in options are also somewhat deficient in the security stakes. A standard ASP.Net session cookie is self-contained and there is no way to invalidate it on the server, which is contrary to [OWASP guidance](https://www.owasp.org/index.php/Session_Management_Cheat_Sheet) because it makes certain attacks more likely. I should mention that there is an option for ASP.Net cookies to just contain a session ID and store the rest of the information server-side, but the documentation is sparse and it lacks certain helpful features. 
+After a user has *Authenticated* to your web application, you want to "keep them logged in" for a while so they don't have to keep re-entering their password or keep bouncing to Facebook or whichever other authentication method you use.
+You would normally do this by issuing a *cookie* or a *token* which is then sent on each subsequent request and identifies the user as already having been *authenticated* to your system.  
 
-Tokens that your application issue have essentially the same problems as cookies *plus* there is no simple way to have an "idle timeout" on a token (Refresh Tokens are not applicable in web scenarios, they are for secure clients).
+"Keep them logged in" is referred to here as an *Authenticated User Session* or just *Session* for short. 
+This is not to be confused with "Session State", which is an entirely separate concept (and something you'd usually want to avoid).  
 
-### Stateless cookies/tokens vs server-side user sessions
-Most ASP.Net built-in options and indeed many recommended approaches for User Session management is to essentially store all the relevant information (Claims or otherwise) in a Cookie or a JWT Token. It saves you from having any server-side storage of sessions and certainly confers a scalability benefit, at the cost of a little extra bandwidth.  
-For many scenarios this approach is fine, but is quite lacking in a security context; if an attacker gets a copy of a user's valid cookie or token there is now no way to invalidate that. It doesn't matter if the user logs out or changes their password, the attacker is still in there.  
+There are many benefits to having an *Authenticated User Session*; If you didn't, you'd have to send a username/password (or something similar) with each request - and validate it, which is usually deliberately slow.  
+There are some scenarios where you may do this with an API client that makes infrequent calls, but that is a separate discussion.
 
-There is a tradeoff here between scalability and security and you need to decide what is right for you. I do know that in pen tests during 2016, the lack of server-side sessions has gone from advisory to must-fix in the ones I see. 
+### There are fundamentally two types of *Authenticated User Sessions*;
+- **Stateful**, where the server keeps a list of Authenticated User Sessions and the client just has a Session ID.
+- **Stateless** where the client holds some "state" to identify them as logged in and, usually, some additional data about them such as name, roles etc. This approach uses various cryptographic mechanisms to make sure the user can't falsify this information.
 
+You can use either cookies or tokens with either approach, for example a cookie can contain either a session ID or a full set of user claims, as can a token.
 
+### Weighing up the options
+There are pros and cons to both approaches and the right approach for a given system will depend on a trade-off;
+- Stateless is inherently more *scalable*; Stateful requires a server-side session store with shared access by all front-end servers, which can be a bottleneck.
+- Stateful is probably more *secure*; In the stateless scenario there is no way to invalidate a session from the server; if an attacker somehow steals a user's session token or cookie, they can impersonate that user and there is very little you can do server-side to stop them; even the legitimate user logging out or changing their password will have no effect. There are a few mitigations, but they are likely to negate the performance benefit of being stateless. The [OWASP guidance](https://www.owasp.org/index.php/Session_Management_Cheat_Sheet) is clear that it must be possible to invalidate user sessions server-side.
+- Stateless combined with tokens and a requirement to log a user out after a period of inactivity requires some fairly clever javascript code to be written by you because tokens, unlike cookies, can't be automatically refreshed by the server. And no, OIDC Refresh Tokens are not the answer for Web applications. Cookies don't have this problem, though.
 
+These things are all relative; how big does your system have to be before the scalability of stateful sessions becomes a problem if you use things like Redis? How likely is it that an attacker can steal a session cookie or token, given the protections that you can put in place? If you just have the one system to build and maintain, do you really mind spending a bit of extra time to write the code that refreshes the token in your front-end JS application?
+
+One thing you may not have much control over is external security audits; In penetration tests during 2016 I have seen a big increase in testers insisting on stateful sessions - whether it is really warranted or not.
+
+### Implementation options
+The default mechanisms in ASP.Net are generally *Stateless*, issuing either a cookie or a JWT token with a full claims principal in it. 
+
+*The aim of **this** library is to supply alternative cookie and token middleware that supports Stateful Authenticated User Sessions*
+
+You should be able to 
+- Use the library to create Sessions, which are stored in a server-side sesion store.
+- Use library middleware to validate sessions on each request and populate the Claims Principal on each request with data from the session store.
+- Use library-provided sessions stores to store sessions in Redis, DocumentDb, SQl - maybe even Azure Table Storage - or provide your own.
+- You may also use this for pure API functions, though for those scenarios you should also consider oAuth or OIDC as probably better options.
 
 ### But doesn't OIDC/oAuth/Identity Server/Facebook/Google/Azure AD B2C/etc solve all this?
 Unfortunately, with very few exceptions, those Identity Providers only deal with the *Authentication* part; The user turns up at your web application with, say, a token from Facebook. That token is just there to say that Facebook knows who this person is. It is then up to you to read that information and set up your own User Session by setting a cookie or issuing your *own* token to the client.
@@ -32,14 +54,24 @@ As a matter of fact, the use of an external Identiy Provider often blinds develo
 
 One exception is Azure AD B2B Authentication, which in certain setups will actually handle the user session for you as well.
 
+**TODO**: Investigate how much IdSrv 4 provides! v3 didn't support this fully, but there is a change v4 does!
+
 It is *possible* to build session management on top of Identity Server; basically you have a session store in IdSrv and you use custom middleware to call back to IdSrv on each request to validate the session and obtain the claims for the user. This works, but it is a fair bit of work and probably only right for certain specific scenarios. 
 
+### Notes
+- It is arguably misleading to talk about Stateful and Stateless Authenticated User Sessions as there is state in both, the difference is only in whether the server or the client keeps the state.
+- There is a lot of confusion about this on the internet, including a series of articles that equate cookies with stateful and tokens with stateless. That is, of course, completely wrong; you can use both cookies or tokens with both stateless and stateful implementations.
+- Technically, you probably wouldn't wrap a simple Session ID in a full JWT token, you would probably just use the Session ID on it's own, but it doesn't really make much difference. The term *token* is used here to mean the scenario where the server passes a string value to the client, which the client then stores somehow and transmits to the server with each request. This is a bit lazy TBH as we are just taking about sending a plain Session ID, not a proper token with lots of data in it. Please forgive and feel free to suggest a better term.
+- ASP.Net OWIN Cookie authentication middleware does have a (thinly documented) ability to store the claims principal in a server-side store and just send a Session ID to the client. However, this is mainly concerned with reducing the payload and does not have the additional security features being discussed here.
+- Up until early 2016, the prevalent advice was that JWT Tokens were safer than Cookies for authentication and, indeed, penetration tests would reflect that. However, that advice turned completely on it's head in 2016 when penetration tests started to complain about the use of tokens over cookies. The reason, in short, is that - as imperfect as cookies are - we have spent many years building protections into browsers, including Secure-Only, Http-Only and so forth. No such protection exists for Tokens, meaning they actually have a much bigger potential attack surface. This is not directly relevant to this library, but is closely related so is worth mentioning. Unfortunately, the debate is highly charged and is muddled by misunderstandings, the massively overloaded term "Token" and the conflation of Stateful/Stateless with Cookie/Token.
 
 ## Design goals
 The User Session Manager will be designed to be called *after* the user has been authenticated, whether locally or by some external Identity Provider. It will establish a User Session, which is stored in a server-side session store, and issue a cookie or a token (other options can be introduced). It will also include the appropriate logic to validate the cookie/token on each subsequent request and populate the Claims Principal for the request.
-- Fast
-- Support for "Remember me"
-- Support for both ASP.Net Core and older ASP.Net, the latter probably through OWIN.
+The library must;
+- Be fast and add minimal overhead to each request, both in time and CPU.
+- Must have support for "Remember me"
+- Must support for both ASP.Net Core and older ASP.Net, the latter probably through OWIN.
+- Be able to integrate with the existing auth middleware, i.e. there are mechanisms for, say, Facebook authentication middleware to hand off to the cookie middleware to set an Authenticated User Session Cookie; the middleware in this library should be able to be used as a replacement for said cookie middleware, if desired.
 
 ## Solution design
 It is worth reading the [OWASP session guidance](https://www.owasp.org/index.php/Session_Management_Cheat_Sheet), which covers a number of the items to be considered.
@@ -90,6 +122,7 @@ If desired, we could make it so a different session ID is generated periodically
 ### Intrusion detection
 *Open question*  
 It would be possible to build in some mechanisms to monitor levels of invalid tokens being submitted, possibly from specific locations/IP addresses etc and maybe raise alarms or dynamically block certain IP addresses temporarily.
+You could argue that this is the responsibility of the application - but to do this kind of monitoring requires shared state between servers, and this library is in a unique position as it has access to exactly that.
 
 ### Remember Me
 Users often request a "remember me" or "keep me logged in for two weeks" feature. Whether or not you want to support that from a security point of view is for you to judge against your particular system. However, this library will have support for it, should you want it.  
