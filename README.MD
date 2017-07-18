@@ -7,6 +7,8 @@ ASP.Net provides good built-in support for Stateless Authenticated User Sessions
 
 **NOTE: At this point in time, no code has been written. This page here is first and foremost intended as a Request For Comment to establish design criteria - and to confirm that there isn't already a solution out there.**
 
+Please comment on the general ["Is this worth it" issue](https://github.com/NewOrbit/UserSession/issues/1) or raise a specific issue with comments. Thank you!
+
 
 ## The problem
 Unfortunately there is a lot of confusion about the whole area of "how to keep users logged in", so the "problem description" here takes quite a lot of words to explain what the problem even is. Sorry.
@@ -54,9 +56,11 @@ As a matter of fact, the use of an external Identiy Provider often blinds develo
 
 One exception is Azure AD B2B Authentication, which in certain setups will actually handle the user session for you as well.
 
-**TODO**: Investigate how much IdSrv 4 provides! v3 didn't support this fully, but there is a change v4 does!
+**TODO**: Investigate how much IdSrv 4 provides! v3 didn't support this fully, but there is a chance v4 does!
 
 It is *possible* to build session management on top of Identity Server; basically you have a session store in IdSrv and you use custom middleware to call back to IdSrv on each request to validate the session and obtain the claims for the user. This works, but it is a fair bit of work and probably only right for certain specific scenarios. 
+
+**TODO**: There is a (small) chance that ASP.Net Core has this built in, though I doubt it from history. Even if it does, there is still the issue of older systems - but it would make the case for this library a lot less compelling.
 
 ### Notes
 - It is arguably misleading to talk about Stateful and Stateless Authenticated User Sessions as there is state in both, the difference is only in whether the server or the client keeps the state.
